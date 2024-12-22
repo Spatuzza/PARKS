@@ -1,0 +1,91 @@
+from notion_client import Client
+import pandas as pd
+
+# Configuración de la API de Notion
+NOTION_API_KEY = "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"
+DATABASE_ID = "1626c82c4bf180c989a6d89f8ef66d40"  # Asegúrate de que este es el ID correcto de la base de datos
+
+# Conexión a Notion
+notion = Client(auth=NOTION_API_KEY)
+
+# Leer el archivo Excel
+archivo_excel = "C:\\Users\\test\\Downloads\\vessel_platforms (1).xlsx"
+df = pd.read_excel(archivo_excel)
+
+# Mostrar las columnas del archivo Excel
+print(f"Columnas en el archivo Excel: {df.columns}")
+
+# Extraer los nombres de los barcos y sus estados
+nombres_barcos_excel = df['# vessel_name'].dropna().tolist()  # Convertir a lista para asegurar que no haya NaN
+estados_barcos_excel = df['#estado'].dropna().tolist()  # Convertir a lista para asegurar que no haya NaN
+
+# Imprimir los estados para verificar que son correctos
+#print(f"Estados extraídos del Excel: {estados_barcos_excel}")
+print(f"Cantidad de barcos en el Excel: {len(nombres_barcos_excel)}")
+print(f"Cantidad de estados en el Excel: {len(estados_barcos_excel)}")
+
+# Obtener los datos actuales de la base de datos de Notion
+response = notion.databases.query(database_id=DATABASE_ID)
+items = response.get('results', [])
+
+# Verificar si la base de datos está vacía
+if not items:
+    print("La base de datos está vacía.")
+else:
+    print(f"Se encontraron {len(items)} registros en la base de datos.")
+
+# Crear un diccionario con los nombres de los barcos y sus estados actuales
+barcos_base_datos = {}
+for item in items:
+    # Verificar si la propiedad 'Nombres_B' tiene datos
+    if 'Nombres_B' in item['properties'] and item['properties']['Nombres_B']['title']:
+        nombre_barco = item['properties']['Nombres_B']['title'][0]['text']['content']
+        
+        # Verificar si 'Estado del Barco' existe y no es None
+        estado_barco = None
+        if 'Estado del Barco' in item['properties']:
+            estado_barco = item['properties']['Estado del Barco'].get('select', {}).get('name', None)
+        
+        barcos_base_datos[nombre_barco] = estado_barco
+    else:
+        print("La propiedad 'Nombres_B' está vacía o no existe en un elemento.")
+
+# Comparar y actualizar o agregar barcos
+for i in range(len(nombres_barcos_excel)):
+    nombre_barco = nombres_barcos_excel[i]
+    estado_barco = estados_barcos_excel[i]  # El estado ahora se toma de la misma posición en el Excel
+    
+    print(f"Procesando barco: {nombre_barco} con estado: {estado_barco}")
+    
+    if nombre_barco in barcos_base_datos:
+        # Si el barco existe en la base de datos, compararlo con el estado del Excel
+        if barcos_base_datos[nombre_barco] != estado_barco:
+            try:
+                # Si el estado es None (vacío), asignar el estado del Excel
+                if barcos_base_datos[nombre_barco] is None:
+                    barcos_base_datos[nombre_barco] = estado_barco
+                
+                # Si el estado es diferente, actualizar el estado del barco
+                page_id = next(item['id'] for item in items if item['properties']['Nombres_B']['title'][0]['text']['content'] == nombre_barco)
+                notion.pages.update(
+                    page_id=page_id,
+                    properties={
+                        'Estado del Barco': {'select': {'name': estado_barco}}  # Asegúrate de que 'Estado del Barco' es el nombre correcto de la propiedad
+                    }
+                )
+                print(f"Estado del barco '{nombre_barco}' actualizado a '{estado_barco}'.")
+            except Exception as e:
+                print(f"Error al actualizar el barco '{nombre_barco}': {e}")
+    else:
+        # Si el barco no existe en la base de datos, agregarlo
+        try:
+            notion.pages.create(
+                parent={"database_id": DATABASE_ID},
+                properties={
+                    'Nombres_B': {'title': [{'text': {'content': nombre_barco}}]},
+                    'Estado del Barco': {'select': {'name': estado_barco}}  # Asegúrate de que 'Estado del Barco' es el nombre correcto de la propiedad
+                }
+            )
+            print(f"Barco '{nombre_barco}' agregado con estado '{estado_barco}'.")
+        except Exception as e:
+            print(f"Error al agregar el barco '{nombre_barco}': {e}")
