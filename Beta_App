@@ -1,0 +1,214 @@
+import sys
+import os
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QTextBrowser, QComboBox, QTextEdit
+from notion_client import Client
+from datetime import datetime
+from PyQt5.QtWidgets import QDateEdit
+from PyQt5.QtCore import QDate
+
+# Conectar con la API de Notion
+NOTION_API_KEY = "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"
+DATABASE_ID = "1686c82c4bf1805191ddcdbf8474c94c"
+DATABASE_ID_BARCOS = "1656c82c4bf180d6ad2ef5420584409b"  # ID de la base de datos de barcos
+DATABASE_ID_PERSONAS = "1656c82c4bf180ca9b19ce2b021d29b9"  # ID de la base de datos de personas
+notion = Client(auth=NOTION_API_KEY)
+
+class NotionApp(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle("Gestión de Tareas - Notion")
+        self.setGeometry(100, 100, 400, 400)
+
+        # Layout principal
+        layout = QVBoxLayout()
+
+        # Título
+        self.label = QLabel("Ingresa el nombre de la tarea:")
+        layout.addWidget(self.label)
+
+        # Entrada de texto para la tarea
+        self.task_input = QLineEdit(self)
+        layout.addWidget(self.task_input)
+
+        # Entrada de fecha de finalización
+        self.date_label = QLabel("Ingresa la fecha de finalización:")
+        layout.addWidget(self.date_label)
+
+        # Campo de fecha (con un valor predeterminado)
+        self.date_input = QDateEdit(self)
+        self.date_input.setDate(QDate.currentDate())  
+        self.date_input.setDisplayFormat("yyyy-MM-dd")  
+        layout.addWidget(self.date_input)
+
+       # ComboBox para seleccionar un barco
+        self.barco_label = QLabel("Seleccione un barco")
+        self.barco_select = QComboBox(self)
+        layout.addWidget(self.barco_label)
+        layout.addWidget(self.barco_select)
+
+        # ComboBox para seleccionar la persona encargada
+        self.persona_label = QLabel("Seleccione al encargado de la tarea")
+        self.persona_select = QComboBox(self)
+        layout.addWidget(self.persona_label)
+        layout.addWidget(self.persona_select)
+        
+        # Área de texto para especificaciones
+        self.specifications_label = QLabel("Especificaciones del barco:")
+        self.specifications_text = QTextEdit(self)
+        layout.addWidget(self.specifications_label)
+        layout.addWidget(self.specifications_text)
+
+        # Botón para crear tarea
+        self.add_task_button = QPushButton("Agregar Tarea", self)
+        self.add_task_button.clicked.connect(self.add_task)
+        layout.addWidget(self.add_task_button)
+
+        # Área para mostrar tareas creadas
+        self.task_display = QTextBrowser(self)
+        layout.addWidget(self.task_display)
+
+        self.setLayout(layout)
+
+        # Cargar los barcos y personas después de que se haya configurado la UI
+        self.load_barcos()
+        self.load_personas()
+
+    def load_barcos(self):
+        """Obtiene los barcos de la base de datos y los carga en el ComboBox"""
+        try:
+            # Consultamos la base de datos de barcos
+            response = notion.databases.query(database_id=DATABASE_ID_BARCOS)
+            barcos = response.get("results", [])
+
+            if not barcos:
+                self.task_display.append("No se encontraron barcos en la base de datos.")
+                return
+
+            # Lista para almacenar los barcos con nombre y propietario
+            barcos_info = []
+
+            # Iteramos a través de los barcos para obtener el nombre y propietario
+            for barco in barcos:
+                # Verificamos si la propiedad 'Nombres_B' y 'Propietario' existen y tienen datos
+                if 'properties' in barco:
+                    nombre = barco['properties'].get('Nombres_B', {}).get('title', [])
+                    propietario = barco['properties'].get('Propietario', {}).get('rich_text', [])
+
+                    # Si tenemos nombre del barco y propietario
+                    if nombre and propietario:
+                        barco_name = nombre[0].get('text', {}).get('content', "Sin nombre")
+                        propietario_name = propietario[0].get('text', {}).get('content', "Sin propietario")
+                        barco_id = barco['id']
+                        barcos_info.append((barco_name, propietario_name, barco_id))
+
+            # Ordenar la lista por propietario (segundo elemento de la tupla)
+            barcos_info.sort(key=lambda x: x[1])  # Ordenar por propietario
+
+            # Cargar los barcos ordenados en el ComboBox
+            for barco_name, propietario_name, barco_id in barcos_info:
+                self.barco_select.addItem(f"{barco_name} - Propietario: {propietario_name}", userData=barco_id)
+
+        except Exception as e:
+            self.task_display.append(f"Error al cargar los barcos: {e}")
+
+    def load_personas(self):
+        """Obtiene las personas de la base de datos y las carga en el ComboBox"""
+        try:
+            # Consultamos la base de datos de personas
+            response = notion.databases.query(database_id=DATABASE_ID_PERSONAS)
+            personas = response.get("results", [])
+
+            if not personas:
+                self.task_display.append("No se encontraron personas en la base de datos.")
+                return
+
+            # Lista para almacenar las personas
+            personas_info = []
+
+            # Iteramos a través de las personas para obtener el nombre y correo
+            for persona in personas:
+                if 'properties' in persona:
+                    nombre = persona['properties'].get('Trabajadores', {}).get('title', [])
+                    correo = persona['properties'].get('Correo', {}).get('email', None)
+
+                    # Si tenemos nombre de la persona
+                    if nombre:
+                        persona_name = nombre[0].get('text', {}).get('content', "Sin nombre")
+                        persona_email = correo if correo else "Sin correo"
+                        persona_id = persona['id']
+                        personas_info.append((persona_name, persona_email, persona_id))
+
+            # Ordenar la lista por nombre (primer elemento de la tupla)
+            personas_info.sort(key=lambda x: x[0])  # Ordenar por nombre
+
+            # Cargar las personas ordenadas en el ComboBox
+            for persona_name, persona_email, persona_id in personas_info:
+                self.persona_select.addItem(f"{persona_name} - Correo: {persona_email}", userData=persona_id)
+
+        except Exception as e:
+            self.task_display.append(f"Error al cargar las personas: {e}")
+
+    def add_task(self):
+        # Obtener el nombre de la tarea desde el input
+        task_name = self.task_input.text()
+        
+        if not task_name:
+            self.task_display.append("Por favor, ingresa un nombre para la tarea.")
+            return
+
+        # Obtener la fecha de finalización desde el input
+        end_date = self.date_input.date().toString("yyyy-MM-dd")
+
+        # Obtener el barco seleccionado desde el ComboBox
+        barco_id = self.barco_select.currentData()
+        persona_id = self.persona_select.currentData()
+        specifications_text = self.specifications_text.toPlainText()
+
+        if not barco_id or not persona_id:
+            self.task_display.append("Por favor, selecciona un barco y una persona encargada.")
+            return
+        # Llamar a la función para crear tarea y grupo
+        try:
+            fecha_actual = datetime.now().isoformat()
+
+            # Crear grupo principal
+            grupo = notion.pages.create(
+                parent={"database_id": DATABASE_ID},
+                properties={
+                    "Progreso": {"title": [{"type": "text", "text": {"content": f"Grupo para {task_name}"}}]},
+                    "Estado": {"status": {"name": "Sin empezar"}},  
+                    "Fecha": {"date": {"start": fecha_actual}}  
+                }
+            )
+            grupo_id = grupo["id"]
+
+            # Crear tarea asociada al grupo
+            tarea = notion.pages.create(
+                parent={"database_id": DATABASE_ID},
+                properties={
+                    "Progreso": {"title": [{"type": "text", "text": {"content": task_name}}]},
+                    "Estado": {"status": {"name": "Sin empezar"}},
+                    "Fecha": {"date": {"start": end_date}},
+                    "Subítem": {"relation": [{"id": grupo_id}]},
+                    "BARCOS": {"relation": [{"id": barco_id}]},  # Relacionamos la tarea con el barco seleccionado
+                    "personas": {"relation": [{"id": persona_id}]}  # Relacionamos la tarea con la persona encargada
+                }
+            )
+
+            # Mostrar mensaje de éxito
+            self.task_display.append(f"Tarea '{task_name}' creada con éxito.")
+            self.task_input.clear()
+            self.barco_select.setCurrentIndex(0)
+            self.persona_select.setCurrentIndex(0)
+
+        except Exception as e:
+            self.task_display.append(f"Error al crear la tarea: {e}")
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = NotionApp()
+    window.show()
+    sys.exit(app.exec_())
