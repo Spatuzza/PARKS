@@ -1,0 +1,86 @@
+import sys
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QTextBrowser, QDateEdit
+from notion_client import Client
+from PyQt5.QtCore import QDate
+from datetime import datetime
+
+# Conectar con la API de Notion
+NOTION_API_KEY = "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"
+DATABASE_ID = "1656c82c4bf1808fa410fa976b23a459"
+notion = Client(auth=NOTION_API_KEY)
+
+class NotionApp(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle("Gestión de Tareas - Notion")
+        self.setGeometry(100, 100, 400, 300)
+
+        # Layout principal
+        layout = QVBoxLayout()
+
+        # Título
+        self.label = QLabel("Ingresa el nombre de la tarea:")
+        layout.addWidget(self.label)
+
+        # Entrada de texto para la tarea
+        self.task_input = QLineEdit(self)
+        layout.addWidget(self.task_input)
+
+        # Entrada de fecha de finalización
+        self.date_label = QLabel("Fecha de finalización:")
+        layout.addWidget(self.date_label)
+
+        # Campo de fecha (valor predeterminado: hoy)
+        self.date_input = QDateEdit(self)
+        self.date_input.setDate(QDate.currentDate())
+        self.date_input.setDisplayFormat("yyyy-MM-dd")
+        layout.addWidget(self.date_input)
+
+        # Botón para crear tarea
+        self.add_task_button = QPushButton("Agregar Tarea", self)
+        self.add_task_button.clicked.connect(self.add_task)
+        layout.addWidget(self.add_task_button)
+
+        # Área para mostrar mensajes
+        self.task_display = QTextBrowser(self)
+        layout.addWidget(self.task_display)
+
+        self.setLayout(layout)
+
+    def add_task(self):
+        # Obtener el nombre de la tarea
+        task_name = self.task_input.text()
+        if not task_name:
+            self.task_display.append("Por favor, ingresa un nombre para la tarea.")
+            return
+
+        # Obtener la fecha de finalización
+        fecha_finalizacion = self.date_input.date().toString("yyyy-MM-dd")
+
+        try:
+            # Crear la tarea en la base de datos de Notion
+            notion.pages.create(
+                parent={"database_id": DATABASE_ID},
+                properties={
+                    "Tarea": {"title": [{"type": "text", "text": {"content": task_name}}]},
+                    "Status": {"status": {"name": "Planificando"}},
+                    "Dates": {"date": {"start": fecha_finalizacion}}
+                }
+            )
+
+            # Mostrar mensaje de éxito
+            self.task_display.append(f"Tarea '{task_name}' creada con éxito.")
+            self.task_input.clear()
+
+        except Exception as e:
+            # Mostrar mensaje de error
+            self.task_display.append(f"Error al crear la tarea: {e}")
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = NotionApp()
+    window.show()
+    sys.exit(app.exec_())
