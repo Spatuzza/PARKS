@@ -1,0 +1,100 @@
+from flask import Flask
+from apscheduler.schedulers.background import BackgroundScheduler
+from notion_client import Client
+import time
+
+# Autenticación con el token de integración de Notion
+notion = Client(auth="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")
+
+# IDs de las bases de datos
+DATABASE_IDS = {
+    "Principal": "1656c82c4bf1808fa410fa976b23a459",  # Base de datos Principal
+    "Ingenieria": "1706c82c4bf180b28817d080f13d1f3f",  # Base de datos Trabajo
+    "I+D": "1706c82c4bf1807cbb60ecb5a1b0604a",  # Base de datos Innovación
+    "Control": "1706c82c4bf180eeb12cca3fd5bc81c6"  # Base de datos Control de Calidad
+}
+
+# Crear la aplicación Flask
+app = Flask(__name__)
+
+# Función para obtener todas las tareas de la base de datos "Principal"
+def get_principal_tasks():
+    query = notion.databases.query(database_id=DATABASE_IDS["Principal"])
+    return query.get("results", [])
+
+# Función para clasificar y mover tareas según su tipo
+def classify_and_move_task(task):
+    # Obtener el tipo de tarea (Control De Calidad, Innovacion, Trabajo)
+    task_type = task["properties"].get("Tipo", {}).get("select", {}).get("name", "")
+    
+    # Imprimir el tipo para depuración
+    print(f"Tarea {task['properties']['Tarea']['title'][0]['text']['content']} tiene tipo: {task_type}")
+    
+    # Determinar a qué base de datos moverla
+    target_database_id = DATABASE_IDS.get(task_type)
+    
+    if target_database_id:
+        # Crear una nueva tarea en la base de datos correspondiente
+        new_task_data = {
+            "parent": {"database_id": target_database_id},
+            "properties": {
+                "Tarea": task["properties"]["Tarea"],  # Usamos "Tarea" como el título
+                "Status": {
+                    "status": {
+                        "id": "planned"  # Asignamos "Planificando" por defecto
+                    }
+                },
+            }
+        }
+
+        # Crear la tarea en la base de datos correspondiente
+        try:
+            new_task = notion.pages.create(**new_task_data)
+            print(f"Tarea '{task['properties']['Tarea']['title'][0]['text']['content']}' movida a {task_type}.")
+            
+            # Eliminar la tarea de la base de datos "Principal"
+            delete_task_from_principal(task["id"])
+        except Exception as e:
+            print(f"Error al crear la tarea: {e}")
+    else:
+        print(f"Error: Tipo de tarea '{task_type}' no reconocido. No se movió la tarea.")
+
+# Función para eliminar la tarea de la base de datos "Principal"
+def delete_task_from_principal(task_id):
+    try:
+        notion.pages.update(
+            page_id=task_id,
+            archived=True  # Marcamos la tarea como archivada para eliminarla
+        )
+        print(f"Tarea {task_id} eliminada de la base de datos principal.")
+    except Exception as e:
+        print(f"Error al eliminar la tarea: {e}")
+
+# Función principal para procesar las tareas
+def process_tasks():
+    tasks = get_principal_tasks()
+    
+    if not tasks:
+        print("No se encontraron tareas en la base de datos principal.")
+        return
+    
+    for task in tasks:
+        classify_and_move_task(task)
+
+# Configuración del trabajo programado para ejecutar el procesamiento cada 30 segundos
+scheduler = BackgroundScheduler()
+scheduler.add_job(func=process_tasks, trigger="interval", seconds=30)
+scheduler.start()
+
+# Ruta para verificar si el servidor está funcionando
+@app.route('/')
+def home():
+    return "Servidor Flask está corriendo y ejecutando tareas cada 30 segundos."
+
+if __name__ == "__main__":
+    try:
+        # Ejecutar el servidor Flask
+        app.run(debug=True, use_reloader=False)  # use_reloader=False para evitar que el scheduler se ejecute dos veces
+    except (KeyboardInterrupt, SystemExit):
+        # Detener el scheduler cuando el servidor Flask se detiene
+        scheduler.shutdown()
